@@ -495,11 +495,5 @@ pub fn main() !void {
 }
 
 fn printUsage() void {
-    std.debug.print("Usage: sweef [OPTIONS]
-  --headless    Run in headless mode
-  --gui         Run with GUI
-  --help, -h    Show help
-", .{});
-},
-    );
+    std.debug.print("Usage: sweef [OPTIONS]\n  --headless    Run in headless mode\n  --gui         Run with GUI\n  --help, -h    Show help\n", .{});
 }
