@@ -1,5 +1,6 @@
 // Sweef Browser - Zig Build Script
-// This is the main build file for the Sweef browser core engine.
+// Minimal build configuration for Sweef browser core engine.
+// Compatible with Zig 0.11.0+
 
 const std = @import("std");
 
@@ -7,156 +8,108 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Sweef core module
-    const sweef_module = b.addModule("sweef", .{
+    // Options
+    const options = b.addOptions();
+    options.addOption(bool, "no-js", false, "Disable JavaScript support");
+    options.addOption(bool, "no-gui", false, "Disable GUI support");
+    options.addOption(bool, "no-tls", false, "Disable TLS/HTTPS support");
+
+    // Create the main module
+    const module = b.addModule("sweef", .{
         .source_file = .{ .path = "src/main.zig" },
-        .target = target,
-        .optimize = optimize,
     });
 
-    // HTTP module
+    // Add submodules as imports
     const http_module = b.addModule("sweef.http", .{
         .source_file = .{ .path = "src/http/client.zig" },
-        .target = target,
-        .optimize = optimize,
     });
-    sweef_module.addImport("http", http_module);
+    module.addImport("http", http_module);
 
-    // DOM module
     const dom_module = b.addModule("sweef.dom", .{
         .source_file = .{ .path = "src/dom/tree.zig" },
-        .target = target,
-        .optimize = optimize,
     });
-    sweef_module.addImport("dom", dom_module);
+    module.addImport("dom", dom_module);
 
-    // HTML module (GUMBO wrapper)
     const html_module = b.addModule("sweef.html", .{
         .source_file = .{ .path = "src/html/parser.zig" },
-        .target = target,
-        .optimize = optimize,
     });
-    sweef_module.addImport("html", html_module);
+    module.addImport("html", html_module);
 
-    // JavaScript module (QuickJS wrapper)
     const js_module = b.addModule("sweef.js", .{
         .source_file = .{ .path = "src/js/engine.zig" },
-        .target = target,
-        .optimize = optimize,
     });
-    sweef_module.addImport("js", js_module);
+    module.addImport("js", js_module);
 
-    // MCP module
     const mcp_module = b.addModule("sweef.mcp", .{
         .source_file = .{ .path = "src/mcp/server.zig" },
-        .target = target,
-        .optimize = optimize,
     });
-    sweef_module.addImport("mcp", mcp_module);
+    module.addImport("mcp", mcp_module);
 
-    // IPC module
     const ipc_module = b.addModule("sweef.ipc", .{
         .source_file = .{ .path = "src/ipc/ipc.zig" },
-        .target = target,
-        .optimize = optimize,
     });
-    sweef_module.addImport("ipc", ipc_module);
+    module.addImport("ipc", ipc_module);
 
-    // Utils module
     const utils_module = b.addModule("sweef.utils", .{
         .source_file = .{ .path = "src/utils/logger.zig" },
-        .target = target,
-        .optimize = optimize,
     });
-    sweef_module.addImport("utils", utils_module);
+    module.addImport("utils", utils_module);
 
     // QuickJS C library
-    const quickjs_options = b.addOptions();
-    quickjs_options.addOption(bool, "no-js", false, "Disable JavaScript support");
-    
-    const quickjs_module = b.addModule("quickjs", .{
-        .source_file = .{ .path = "../quickjs/quickjs.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
-    
-    // Link QuickJS only if JS is enabled
-    if (!b.option(quickjs_options, "no-js", bool)) {
-        sweef_module.addImport("quickjs", quickjs_module);
-        
-        // Add QuickJS C source files
+    if (!b.option(options, "no-js", bool)) {
+        module.addIncludePath(.{ .path = "../quickjs" });
+
         const quickjs_c_files = &[_][]const u8{
             "../quickjs/quickjs.c",
             "../quickjs/libregexp.c",
             "../quickjs/libunicode.c",
+            "../quickjs/cutils.c",
+            "../quickjs/dtoa.c",
+            "../quickjs/quickjs-libc.c",
         };
-        
+
         for (quickjs_c_files) |c_file| {
-            sweef_module.addCSourceFile(.{
+            module.addCSourceFile(.{
                 .file = .{ .path = c_file },
                 .flags = &.{" -D_CONFIG_H_"},
             });
         }
-        
-        // Add required C libraries
-        sweef_module.linkLibC();
-        sweef_module.linkLibM();
-    }
 
-    // GUMBO HTML parser
-    sweef_module.addCSourceFile(.{
-        .file = .{ .path = "../quickjs/gumbo.c" },
-        .flags = &.{},
-    });
+        module.linkLibC();
+        module.linkLibM();
+    }
 
     // SDL2 for GUI (optional)
-    const gui_options = b.addOptions();
-    gui_options.addOption(bool, "no-gui", false, "Disable GUI support");
-    
-    if (!b.option(gui_options, "no-gui", bool)) {
-        sweef_module.addCSourceFile(.{
-            .file = .{ .path = "src/gui/sdl.zig" },
-            .flags = &.{" -DSWEEF_GUI"},
-        });
-        sweef_module.linkLibrary("SDL2");
-        sweef_module.linkLibrary("SDL2_image");
-        sweef_module.linkLibrary("SDL2_ttf");
+    if (!b.option(options, "no-gui", bool)) {
+        module.linkLibrary("SDL2");
+        module.linkLibrary("SDL2_image");
+        module.linkLibrary("SDL2_ttf");
     }
 
-    // Network options
-    const network_options = b.addOptions();
-    network_options.addOption(bool, "no-tls", false, "Disable TLS/HTTPS support");
-    
-    if (!b.option(network_options, "no-tls", bool)) {
-        // Add mbedTLS for HTTPS support
-        sweef_module.addCSourceFile(.{
-            .file = .{ .path = "src/http/tls.zig" },
-            .flags = &.{},
-        });
-        sweef_module.linkLibrary("mbedtls");
-        sweef_module.linkLibrary("mbedx509");
-        sweef_module.linkLibrary("mbedcrypto");
+    // mbedTLS for HTTPS (optional)
+    if (!b.option(options, "no-tls", bool)) {
+        module.linkLibrary("mbedtls");
+        module.linkLibrary("mbedx509");
+        module.linkLibrary("mbedcrypto");
     }
 
     // Executable
-    const sweef_exe = b.addExecutable(.{
+    const exe = b.addExecutable(.{
         .name = "sweef",
-        .root_module = sweef_module,
+        .root_module = module,
         .target = target,
         .optimize = optimize,
     });
 
-    // Install
-    b.installArtifact(sweef_exe);
+    // Install the executable
+    b.installArtifact(exe);
 
     // Test executable
-    const test_module = b.addModule("sweef.test", .{
+    const test_module = b.addModule("sweef-test", .{
         .source_file = .{ .path = "src/test.zig" },
-        .target = target,
-        .optimize = optimize,
     });
-    test_module.addImport("sweef", sweef_module);
-    
+    test_module.addImport("sweef", module);
+
     const test_exe = b.addExecutable(.{
         .name = "sweef-test",
         .root_module = test_module,
@@ -164,10 +117,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Run tests
+    // Run tests as a step
     const run_tests = b.addRunArtifact(test_exe);
-    run_tests.step.dependOn(&sweef_exe.step);
-    
+    run_tests.step.dependOn(&exe.step);
+
     const test_step = b.step("test", "Run Sweef tests");
     test_step.dependOn(&run_tests.step);
 }
