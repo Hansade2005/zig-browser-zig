@@ -146,7 +146,7 @@ pub const SweefBrowser = struct {
         var input: [1024]u8 = undefined;
         while (true) {
             std.debug.print("> ", .{});
-            const line = std.io.getStdIn().readUntilDelimiterOrEofAlloc(self.allocator, '\n', 1024) catchcontinue;
+            const line = std.io.getStdIn().readUntilDelimiterOrEofAlloc(self.allocator, '\n', 1024) catch continue;
             defer self.allocator.free(line);
 
             const trimmed = std.mem.trim(u8, line, " \r\n");
