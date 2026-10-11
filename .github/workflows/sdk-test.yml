@@ -28,12 +28,9 @@ jobs:
           submodules: 'recursive'
 
       - name: Install Zig
-        run: |
-          curl -L https://ziglang.org/builds/zig-linux-x86_64-0.11.0.tar.xz -o zig.tar.xz
-          mkdir -p zig-install
-          tar -xf zig.tar.xz -C zig-install --strip-components=1
-          echo "$(pwd)/zig-install" >> $GITHUB_PATH
-          rm zig.tar.xz
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.11.0
 
       - name: Install dependencies
         run: |
@@ -176,12 +173,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Zig
-        run: |
-          curl -L https://ziglang.org/builds/zig-linux-x86_64-0.11.0.tar.xz -o zig.tar.xz
-          mkdir -p zig-install
-          tar -xf zig.tar.xz -C zig-install --strip-components=1
-          echo "$(pwd)/zig-install" >> $GITHUB_PATH
-          rm zig.tar.xz
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.11.0
 
       - name: Install dependencies
         run: |
@@ -464,12 +458,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Zig
-        run: |
-          curl -L https://ziglang.org/builds/zig-linux-x86_64-0.11.0.tar.xz -o zig.tar.xz
-          mkdir -p zig-install
-          tar -xf zig.tar.xz -C zig-install --strip-components=1
-          echo "$(pwd)/zig-install" >> $GITHUB_PATH
-          rm zig.tar.xz
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.11.0
 
       - name: Build Sweef binary
         working-directory: core
@@ -507,3 +498,87 @@ jobs:
           fi
           
           echo "=== Binary size validation completed ==="
+
+  # Release step - only runs when all tests pass
+  release:
+    name: Create Release Artifacts
+    needs: [test-nodejs-sdk, test-python-sdk, test-mcp-integration, test-memory-usage, test-binary-size]
+    runs-on: ubuntu-latest
+    if: success()
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.11.0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libmbedtls-dev
+
+      - name: Build release binary
+        working-directory: core
+        run: |
+          echo "=== Building Release Binary ==="
+          zig build -Doptimize=ReleaseSmall
+          
+          # Strip debug symbols for smaller size
+          strip zig-out/bin/sweef
+          
+          # Create version info
+          echo "Sweef Browser v0.1.0" > version.txt
+          echo "Built: $(date)" >> version.txt
+          echo "Git SHA: ${{ github.sha }}" >> version.txt
+          
+          # Create release directory
+          mkdir -p release
+          cp zig-out/bin/sweef release/sweef-linux-x64
+          cp version.txt release/
+          
+          echo "=== Release binary created ==="
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sweef-release-v0.1.0
+          path: release/
+          retention-days: 30
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          name: Sweef Browser v0.1.0
+          tag_name: v0.1.0
+          body: |
+            # Sweef Browser v0.1.0
+            
+            Ultra-lightweight browser for AI agents and humans.
+            
+            ## Features
+            - Core engine in Zig with QuickJS JavaScript support
+            - HTTP/1.1 client
+            - Lightweight DOM implementation
+            - MCP server for AI agents
+            - Node.js and Python SDKs
+            - Headless and GUI modes
+            
+            ## Memory & Size
+            - **Memory Target:** 50MB RAM
+            - **Storage Target:** 400MB
+            - **Binary Size:** Under 10MB
+            
+            ## Installation
+            Download the binary for your platform from the assets below.
+          files: |
+            release/sweef-linux-x64
+            release/version.txt
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

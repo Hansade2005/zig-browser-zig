@@ -30,13 +30,9 @@ jobs:
           submodules: 'recursive'
 
       - name: Install Zig
-        run: |
-          # Download Zig 0.11.0
-          curl -L https://ziglang.org/builds/zig-linux-x86_64-0.11.0.tar.xz -o zig.tar.xz
-          mkdir -p zig-install
-          tar -xf zig.tar.xz -C zig-install --strip-components=1
-          echo "$(pwd)/zig-install" >> $GITHUB_PATH
-          rm zig.tar.xz
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.11.0
 
       - name: Verify Zig installation
         run: |
@@ -102,6 +98,95 @@ jobs:
             core/build-release.log
             core/test-results.log
 
+  # Release step - only runs when all build and test jobs pass
+  release-artifacts:
+    name: Create Release Artifacts
+    needs: [build-linux, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    if: success()
+    timeout-minutes: 15
+
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release directory
+        run: |
+          mkdir -p release
+          
+          # Copy Linux binary
+          if [ -f "artifacts/sweef-linux-x64/sweef" ]; then
+            cp artifacts/sweef-linux-x64/sweef release/sweef-linux-x64
+            chmod +x release/sweef-linux-x64
+          fi
+          
+          # Copy macOS binary (if available)
+          if [ -f "artifacts/sweef-macos-x64/sweef" ]; then
+            cp artifacts/sweef-macos-x64/sweef release/sweef-macos-x64
+            chmod +x release/sweef-macos-x64
+          fi
+          
+          # Copy Windows binary (if available)
+          if [ -f "artifacts/sweef-windows-x64/sweef.exe" ]; then
+            cp artifacts/sweef-windows-x64/sweef.exe release/sweef-windows-x64.exe
+          fi
+          
+          # Create version info
+          echo "Sweef Browser v0.1.0" > release/version.txt
+          echo "Built: $(date)" >> release/version.txt
+          echo "Git SHA: ${{ github.sha }}" >> release/version.txt
+          echo "Commit: ${{ github.ref }}" >> release/version.txt
+          
+          # List release contents
+          ls -lh release/
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sweef-release-v0.1.0-${{ github.run_id }}
+          path: release/
+          retention-days: 90
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          name: Sweef Browser v0.1.0 (Automated)
+          tag_name: v0.1.0-alpha-${{ github.run_number }}
+          body: |
+            # Sweef Browser v0.1.0 (Automated Build)
+            
+            This is an automated release created from GitHub Actions.
+            
+            ## Build Information
+            - **Build Number:** ${{ github.run_number }}
+            - **Git SHA:** ${{ github.sha }}
+            - **Built:** $(date)
+            
+            ## Platforms
+            - ✅ Linux x86_64
+            - ✅ macOS x86_64
+            - ✅ Windows x86_64
+            
+            ## Memory & Size Targets
+            - **Memory:** 50MB RAM
+            - **Storage:** 400MB
+            - **Binary Size:** Under 10MB per platform
+            
+            ## Download
+            Download the appropriate binary for your platform from the assets below.
+          files: |
+            release/sweef-linux-x64
+            release/sweef-macos-x64
+            release/sweef-windows-x64.exe
+            release/version.txt
+          draft: true
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build-macos:
     name: Build & Test (macOS)
     runs-on: macos-latest
@@ -114,12 +199,9 @@ jobs:
           submodules: 'recursive'
 
       - name: Install Zig
-        run: |
-          curl -L https://ziglang.org/builds/zig-macos-x86_64-0.11.0.tar.xz -o zig.tar.xz
-          mkdir -p zig-install
-          tar -xf zig.tar.xz -C zig-install --strip-components=1
-          echo "$(pwd)/zig-install" >> $GITHUB_PATH
-          rm zig.tar.xz
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.11.0
 
       - name: Verify Zig installation
         run: |
@@ -172,12 +254,9 @@ jobs:
           submodules: 'recursive'
 
       - name: Install Zig
-        run: |
-          # Download Zig for Windows
-          Invoke-WebRequest -Uri "https://ziglang.org/builds/zig-windows-x86_64-0.11.0.zip" -OutFile "zig.zip"
-          Expand-Archive -Path "zig.zip" -DestinationPath "zig-install"
-          Add-Content -Path $env:GITHUB_PATH -Value "$(Get-Location)\zig-install"
-          Remove-Item "zig.zip"
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.11.0
 
       - name: Verify Zig installation
         run: |
