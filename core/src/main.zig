@@ -28,8 +28,8 @@ const SweefBrowser = struct {
     config: SweefConfig,
     allocator: std.mem.Allocator,
 
-    pub fn init(config: SweefConfig) !*SweefBrowser {
-        return .{
+    pub fn init(config: SweefConfig) SweefBrowser {
+        return SweefBrowser{
             .config = config,
             .allocator = std.heap.page_allocator,
         };
@@ -78,13 +78,13 @@ fn printUsage() void {
 }
 
 fn parseArgs() SweefConfig {
-    const args = std.process.args();
+    var args_iter = std.process.args();
     var config = SweefConfig{};
 
-    var i: usize = 1; // Skip program name
-    while (i < args.len) : (i += 1) {
-        const arg = args[i];
+    // Skip program name
+    _ = args_iter.next();
 
+    while (args_iter.next()) |arg| {
         if (std.mem.eql(u8, arg, "--headless")) {
             config.headless = true;
         } else if (std.mem.eql(u8, arg, "--gui")) {
@@ -94,15 +94,18 @@ fn parseArgs() SweefConfig {
             config.debug = true;
         } else if (std.mem.eql(u8, arg, "--mcp")) {
             config.mcp = true;
-        } else if (std.mem.eql(u8, arg, "--mcp-port") and i + 1 < args.len) {
-            config.mcp_port = std.fmt.parseInt(u16, args[i + 1], 10) catch 3000;
-            i += 1;
-        } else if (std.mem.eql(u8, arg, "--url") and i + 1 < args.len) {
-            config.url = args[i + 1];
-            i += 1;
-        } else if (std.mem.eql(u8, arg, "--script") and i + 1 < args.len) {
-            config.script = args[i + 1];
-            i += 1;
+        } else if (std.mem.eql(u8, arg, "--mcp-port")) {
+            if (args_iter.next()) |port_str| {
+                config.mcp_port = std.fmt.parseInt(u16, port_str, 10) catch 3000;
+            }
+        } else if (std.mem.eql(u8, arg, "--url")) {
+            if (args_iter.next()) |url| {
+                config.url = url;
+            }
+        } else if (std.mem.eql(u8, arg, "--script")) {
+            if (args_iter.next()) |script| {
+                config.script = script;
+            }
         } else if (std.mem.eql(u8, arg, "--repl")) {
             config.repl = true;
         } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
@@ -120,8 +123,9 @@ fn parseArgs() SweefConfig {
 pub fn main() !void {
     const config = parseArgs();
 
-    const browser = try SweefBrowser.init(config);
-    defer browser.deinit();
-
-    try browser.run();
+    const browser = SweefBrowser.init(config);
+    browser.run() catch |err| {
+        std.debug.print("Error: {any}\n", .{err});
+        std.process.exit(1);
+    };
 }
