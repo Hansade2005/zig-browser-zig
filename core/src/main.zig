@@ -123,7 +123,7 @@ fn parseArgs() SweefConfig {
 pub fn main() !void {
     const config = parseArgs();
 
-    const browser = SweefBrowser.init(config);
+    var browser = SweefBrowser.init(config);
     browser.run() catch |err| {
         std.debug.print("Error: {any}\n", .{err});
         std.process.exit(1);
