@@ -190,7 +190,6 @@ const Page = struct {
     }
 
     pub fn goto(self: *Page, url: []const u8) !void {
-        _ = url;
         // HTTP request would go here
         if (self.config.debug) {
             std.debug.print("Loading: {s}\n", .{url});
@@ -198,7 +197,6 @@ const Page = struct {
     }
 
     pub fn evaluate(self: *Page, script: []const u8) !void {
-        _ = script;
         if (self.config.debug) {
             std.debug.print("Evaluating: {s}\n", .{script});
         }
@@ -210,7 +208,7 @@ fn parseArgs() SweefConfig {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var args = std.process.args();
+    const args = std.process.args();
 
     var config = SweefConfig{};
 
