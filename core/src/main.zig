@@ -82,7 +82,7 @@ fn parseArgs() SweefConfig {
     var config = SweefConfig{};
 
     // Skip program name
-    _ = args_iter.next();
+    _ = args_iter.skip();
 
     while (args_iter.next()) |arg| {
         if (std.mem.eql(u8, arg, "--headless")) {
