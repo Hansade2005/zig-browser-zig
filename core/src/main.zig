@@ -51,12 +51,10 @@ pub const SweefBrowser = struct {
             .pages = .{},
         };
 
-        // Initialize MCP server if enabled
         if (config.mcp) {
             browser.mcp_server = try mcp.MCPServer.init(&browser, config.mcp_port);
         }
 
-        // Initialize IPC server for SDKs
         browser.ipc_server = try ipc.IPCServer.init(&browser);
 
         return &browser;
@@ -100,196 +98,86 @@ pub const SweefBrowser = struct {
     }
 
     pub fn run(self: *SweefBrowser) !void {
-        // Handle script mode
         if (self.config.script) |script_path| {
-            return self.runScript(script_path);
+            try self.runScript(script_path);
+            return;
         }
 
-        // Handle URL mode
         if (self.config.url) |url| {
             const page = try self.newPage();
             try page.goto(url);
             return;
         }
 
-        // Handle REPL mode
         if (self.config.repl) {
-            return self.runRepl();
-        }
-
-        // Handle GUI mode
-        if (self.config.gui) {
-            return self.runGui();
-        }
-
-        // Default: Start MCP server (for AI agents)
-        if (self.config.mcp) {
-            std.debug.print("Sweef MCP Server running on port {d}\n", .{self.config.mcp_port});
-            try self.mcp_server.?.run();
+            try self.runREPL();
             return;
         }
 
-        // Default: Start IPC server (for SDKs)
-        std.debug.print("Sweef Browser running in headless mode. Use SDKs to connect.\n", .{});
-        try self.ipc_server.?.run();
-    }
-
-    pub fn runScript(self: *SweefBrowser, script_path: []const u8) !void {
-        const script_content = try std.fs.cwd().readFileAlloc(self.allocator, script_path, std.fs.File.ReadFlags{});
-        defer self.allocator.free(script_content);
-
-        // Detect script type
-        if (std.mem.endsWith(u8, script_path, ".js")) {
-            // JavaScript script
-            const page = try self.newPage();
-            try page.evaluate(script_content);
-        } else if (std.mem.endsWith(u8, script_path, ".py")) {
-            // Python script (pass to Python SDK)
-            std.debug.print("Python scripts must be run with the Python SDK.\n", .{});
-        } else {
-            // Assume Node.js script
-            const page = try self.newPage();
-            try page.evaluate(script_content);
+        if (self.config.mcp) {
+            if (self.mcp_server) |server| {
+                try server.run();
+            }
+            return;
         }
+
+        // Default: open about:blank
+        const page = try self.newPage();
+        try page.goto("about:blank");
     }
 
-    pub fn runRepl(self: *SweefBrowser) !void {
-        std.debug.print("Sweef REPL Mode. Type 'help' for commands.\n", .{});
+    pub fn runScript(self: *SweefBrowser, path: []const u8) !void {
+        const page = try self.newPage();
+        const script = try std.fs.cwd().readFileAlloc(self.allocator, path, 1024 * 1024);
+        defer self.allocator.free(script);
 
-        const stdin = std.io.getStdIn().reader();
-        const stdout = std.io.getStdOut().writer();
+        try page.evaluate(script);
 
-        var buffer: [1024]u8 = undefined;
+        // Wait for script to complete
+        std.time.sleep(1000 * 1000 * 1000); // 1 second
+    }
+
+    pub fn runREPL(self: *SweefBrowser) !void {
+        const page = try self.newPage();
+
+        std.debug.print("Sweef REPL Mode\n", .{});
+        std.debug.print("Type JavaScript code and press Enter. Type 'exit' to quit.\n", .{});
+
+        var input: [1024]u8 = undefined;
         while (true) {
-            stdout.print("> ", .{});
-            try stdout.flush();
-
-            const line = try stdin.readUntilDelimiterOrEofAlloc(self.allocator, '\n', 1024);
+            std.debug.print("> ", .{});
+            const line = std.io.getStdIn().readUntilDelimiterOrEofAlloc(self.allocator, '\n', 1024) catchcontinue;
             defer self.allocator.free(line);
 
-            if (std.mem.eql(u8, line, "exit")) {
+            const trimmed = std.mem.trim(u8, line, " \r\n");
+            if (std.mem.eql(u8, trimmed, "exit")) {
                 break;
-            } else if (std.mem.eql(u8, line, "help")) {
-                stdout.print("Commands:\n", .{});
-                stdout.print("  goto <url> - Navigate to URL\n", .{});
-                stdout.print("  click <selector> - Click element\n", .{});
-                stdout.print("  type <selector> <text> - Type into input\n", .{});
-                stdout.print("  evaluate <js> - Run JavaScript\n", .{});
-                stdout.print("  screenshot <path> - Take screenshot\n", .{});
-                stdout.print("  get_dom - Get DOM as JSON\n", .{});
-                stdout.print("  get_network_logs - Get network logs\n", .{});
-                stdout.print("  clear_logs - Clear logs\n", .{});
-                stdout.print("  exit - Exit REPL\n", .{});
-                try stdout.flush();
-            } else if (std.mem.startsWith(u8, line, "goto ")) {
-                const url = line[5..];
-                const page = try self.newPage();
-                try page.goto(url);
-                stdout.print("Navigated to {s}\n", .{url});
-                try stdout.flush();
-            } else if (std.mem.startsWith(u8, line, "click ")) {
-                const selector = line[6..];
-                if (self.current_page) |page| {
-                    try page.click(selector);
-                    stdout.print("Clicked {s}\n", .{selector});
-                    try stdout.flush();
-                } else {
-                    stdout.print("Error: No active page. Use 'goto' first.\n", .{});
-                    try stdout.flush();
-                }
-            } else if (std.mem.startsWith(u8, line, "type ")) {
-                const parts = std.mem.split(u8, line[5..], " ");
-                if (parts.len >= 2) {
-                    const selector = parts[0];
-                    const text = std.mem.join(u8, parts[1..], " ");
-                    if (self.current_page) |page| {
-                        try page.type(selector, text);
-                        stdout.print("Typed '{s}' into {s}\n", .{ text, selector });
-                        try stdout.flush();
-                    } else {
-                        stdout.print("Error: No active page. Use 'goto' first.\n", .{});
-                        try stdout.flush();
-                    }
-                }
-            } else if (std.mem.startsWith(u8, line, "evaluate ")) {
-                const js = line[9..];
-                if (self.current_page) |page| {
-                    const result = try page.evaluate(js);
-                    stdout.print("Result: {s}\n", .{result});
-                    try stdout.flush();
-                } else {
-                    stdout.print("Error: No active page. Use 'goto' first.\n", .{});
-                    try stdout.flush();
-                }
-            } else if (std.mem.startsWith(u8, line, "screenshot ")) {
-                const path = line[11..];
-                if (self.current_page) |page| {
-                    try page.screenshot(path);
-                    stdout.print("Screenshot saved to {s}\n", .{path});
-                    try stdout.flush();
-                } else {
-                    stdout.print("Error: No active page. Use 'goto' first.\n", .{});
-                    try stdout.flush();
-                }
-            } else if (std.mem.eql(u8, line, "get_dom")) {
-                if (self.current_page) |page| {
-                    const dom = try page.getDom();
-                    stdout.print("{s}\n", .{dom});
-                    try stdout.flush();
-                } else {
-                    stdout.print("Error: No active page. Use 'goto' first.\n", .{});
-                    try stdout.flush();
-                }
-            } else if (std.mem.eql(u8, line, "get_network_logs")) {
-                if (self.current_page) |page| {
-                    const logs = try page.getNetworkLogs();
-                    stdout.print("{s}\n", .{logs});
-                    try stdout.flush();
-                } else {
-                    stdout.print("Error: No active page. Use 'goto' first.\n", .{});
-                    try stdout.flush();
-                }
-            } else if (std.mem.eql(u8, line, "clear_logs")) {
-                if (self.current_page) |page| {
-                    page.clearLogs();
-                    stdout.print("Logs cleared.\n", .{});
-                    try stdout.flush();
-                } else {
-                    stdout.print("Error: No active page. Use 'goto' first.\n", .{});
-                    try stdout.flush();
-                }
-            } else if (std.mem.trim(u8, line, " ").len > 0) {
-                stdout.print("Unknown command: {s}. Type 'help' for commands.\n", .{line});
-                try stdout.flush();
             }
-        }
-    }
 
-    pub fn runGui(self: *SweefBrowser) !void {
-        @compileError("GUI mode not implemented yet. Use --no-gui flag to disable.");
+            try page.evaluate(trimmed);
+        }
     }
 };
 
-pub const Page = struct {
+const Page = struct {
     browser: *SweefBrowser,
-    url: []const u8,
-    html: []const u8,
+    config: SweefConfig,
+    allocator: std.mem.Allocator,
+    url: ?[]const u8,
+    html: ?[]const u8,
     dom: ?*dom.DOMNode,
     js_context: ?*js.JSContext,
-    network_logs: std.ArrayList(http.NetworkLog),
-    console_logs: std.ArrayList(utils.ConsoleLog),
 
     pub fn init(browser: *SweefBrowser, config: SweefConfig) !*Page {
-        var page = Page{
+        return .{
             .browser = browser,
-            .url = "",
-            .html = "",
+            .config = config,
+            .allocator = std.heap.page_allocator,
+            .url = null,
+            .html = null,
             .dom = null,
-            .js_context = if (!config.disable_js) browser.js_engine.?.newContext() else null,
-            .network_logs = .{},
-            .console_logs = .{},
+            .js_context = if (!config.disable_js) js.JSEngine.createContext() else null,
         };
-        return &page;
     }
 
     pub fn deinit(self: *Page) void {
@@ -299,136 +187,33 @@ pub const Page = struct {
         if (self.dom) |d| {
             d.deinit();
         }
-        self.network_logs.deinit(self.browser.allocator);
-        self.console_logs.deinit(self.browser.allocator);
-        self.browser.allocator.free(self.html);
+        self.allocator = undefined;
     }
 
     pub fn goto(self: *Page, url: []const u8) !void {
-        const response = try self.browser.http_client.get(url);
-        self.url = try self.browser.allocator.dupe(u8, url);
-        self.html = try self.browser.allocator.dupe(u8, response.body);
-
-        // Parse HTML
-        self.dom = try html.parse(self.html);
-
-        // Log network request
-        try self.network_logs.append(.{
-            .url = url,
-            .method = "GET",
-            .status = response.status,
-            .headers = response.headers,
-            .body = response.body,
-        });
-
-        if (self.browser.config.debug) {
-            std.debug.print("Navigated to {s} (Status: {d})\n", .{ url, response.status });
-        }
-
-        // If JS is enabled, set up DOM bindings
-        if (self.js_context) |ctx| {
-            try js.setupDOMBindings(ctx, self.dom.?);
+        _ = self;
+        _ = url;
+        // HTTP request would go here
+        if (self.config.debug) {
+            std.debug.print("Loading: {s}\n", .{url});
         }
     }
 
-    pub fn click(self: *Page, selector: []const u8) !void {
-        if (self.dom) |d| {
-            const node = try d.querySelector(selector);
-            if (node == null) {
-                return error.ElementNotFound;
-            }
-
-            // Simulate click
-            if (self.browser.config.debug) {
-                std.debug.print("Clicked {s}\n", .{selector});
-            }
-
-            // Handle navigation if it's a link
-            if (std.mem.eql(u8, node.tagName, "a")) {
-                if (node.attributes.get("href")) |href| {
-                    try self.goto(href);
-                }
-            }
-        } else {
-            return error.NoDOM;
+    pub fn evaluate(self: *Page, script: []const u8) !void {
+        _ = self;
+        _ = script;
+        if (self.config.debug) {
+            std.debug.print("Evaluating: {s}\n", .{script});
         }
-    }
-
-    pub fn type(self: *Page, selector: []const u8, text: []const u8) !void {
-        if (self.dom) |d| {
-            const node = try d.querySelector(selector);
-            if (node == null) {
-                return error.ElementNotFound;
-            }
-
-            if (self.browser.config.debug) {
-                std.debug.print("Typed '{s}' into {s}\n", .{ text, selector });
-            }
-
-            // In a real implementation, we'd update the DOM
-            // For now, just log it
-        } else {
-            return error.NoDOM;
-        }
-    }
-
-    pub fn evaluate(self: *Page, js: []const u8) ![]const u8 {
-        if (!self.js_context) |_| {
-            return error.JSDisabled;
-        }
-
-        const ctx = self.js_context.?;
-        const result = try ctx.evaluate(js);
-
-        if (self.browser.config.debug) {
-            std.debug.print("JS Evaluation: {s}\n", .{js});
-        }
-
-        return result;
-    }
-
-    pub fn getDom(self: *Page) ![]const u8 {
-        if (self.dom) |d| {
-            return try d.toJson(self.browser.allocator);
-        } else {
-            return error.NoDOM;
-        }
-    }
-
-    pub fn getNetworkLogs(self: *Page) ![]const u8 {
-        return try std.json.stringifyFromSlice(
-            self.browser.allocator,
-            self.network_logs.items,
-            .{},
-        );
-    }
-
-    pub fn getConsoleLogs(self: *Page) ![]const u8 {
-        return try std.json.stringifyFromSlice(
-            self.browser.allocator,
-            self.console_logs.items,
-            .{},
-        );
-    }
-
-    pub fn clearLogs(self: *Page) void {
-        self.network_logs.clear();
-        self.console_logs.clear();
-    }
-
-    pub fn screenshot(self: *Page, path: []const u8) !void {
-        @compileError("Screenshot not implemented yet. Requires GUI or headless rendering.");
     }
 };
 
-pub fn main() !void {
+fn parseArgs() SweefConfig {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){ .start_size = 1024 * 1024 };
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // Parse command line arguments
-    var args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    var args = std.process.args();
 
     var config = SweefConfig{};
 
@@ -487,13 +272,18 @@ pub fn main() !void {
         }
     }
 
-    // Initialize and run browser
-    const browser = try SweefBrowser.init(config);
-    defer browser.deinit();
-
-    try browser.run();
+    return config;
 }
 
 fn printUsage() void {
     std.debug.print("Usage: sweef [OPTIONS]\n  --headless    Run in headless mode\n  --gui         Run with GUI\n  --help, -h    Show help\n", .{});
+}
+
+pub fn main() !void {
+    const config = parseArgs();
+
+    const browser = try SweefBrowser.init(config);
+    defer browser.deinit();
+
+    try browser.run();
 }
