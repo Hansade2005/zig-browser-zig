@@ -8,9 +8,6 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Options - addOptions() takes no arguments in Zig 0.11.0
-    const options = b.addOptions();
-
     // Create the main module
     const module = b.addModule("sweef", .{
         .source_file = .{ .path = "src/main.zig" },
@@ -51,20 +48,6 @@ pub fn build(b: *std.Build) void {
         .source_file = .{ .path = "src/utils/logger.zig" },
     });
     module.addImport("utils", utils_module);
-
-    // QuickJS C library
-    // Note: QuickJS integration requires additional setup
-    // For now, skip to get a basic build working
-
-    // SDL2 for GUI (optional)
-    // module.linkLibrary("SDL2");
-    // module.linkLibrary("SDL2_image");
-    // module.linkLibrary("SDL2_ttf");
-
-    // mbedTLS for HTTPS (optional)
-    // module.linkLibrary("mbedtls");
-    // module.linkLibrary("mbedx509");
-    // module.linkLibrary("mbedcrypto");
 
     // Executable
     const exe = b.addExecutable(.{
