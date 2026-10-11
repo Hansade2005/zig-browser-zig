@@ -206,7 +206,7 @@ const Page = struct {
 fn parseArgs() SweefConfig {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){ .start_size = 1024 * 1024 };
     defer _ = gpa.deinit();
-    const _ = gpa.allocator();
+    _ = gpa.allocator();
 
     const args = std.process.args();
 
