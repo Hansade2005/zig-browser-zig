@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  sweef:
+    build: .
+    volumes:
+      - .:/workspace/sweef
+    working_dir: /workspace/sweef/core
+    command: zig build -Doptimize=ReleaseSafe
+
+  sweef-dev:
+    build: .
+    volumes:
+      - .:/workspace/sweef
+    working_dir: /workspace/sweef
+    command: sleep infinity
+    ports:
+      - "3000:3000"  # MCP server port
+      - "9222:9222"  # IPC server port

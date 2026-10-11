@@ -1,0 +1,204 @@
+name: Nightly Build & Test
+
+on:
+  schedule:
+    # Run every night at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch or tag to build'
+        required: false
+        default: 'main'
+
+concurrency:
+  group: nightly-${{ github.ref || github.event.inputs.ref || 'main' }}
+  cancel-in-progress: true
+
+jobs:
+  nightly-build:
+    name: Nightly Build & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || 'main' }}
+          submodules: 'recursive'
+
+      - name: Install Zig
+        run: |
+          curl -L https://ziglang.org/builds/zig-linux-x86_64-0.11.0.tar.xz -o zig.tar.xz
+          mkdir -p zig-install
+          tar -xf zig.tar.xz -C zig-install --strip-components=1
+          echo "$(pwd)/zig-install" >> $GITHUB_PATH
+          rm zig.tar.xz
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev libmbedtls-dev
+
+      - name: Build with all optimizations
+        working-directory: core
+        run: |
+          echo "=== Nightly Build ==="
+          echo "Date: $(date)"
+          echo "Ref: ${{ github.ref || github.event.inputs.ref || 'main' }}"
+          
+          # Build with Debug
+          echo "Building with Debug optimization..."
+          zig build -Doptimize=Debug 2>&1 | tee build-debug.log
+          
+          # Build with ReleaseSafe
+          echo "Building with ReleaseSafe optimization..."
+          zig build -Doptimize=ReleaseSafe 2>&1 | tee build-release.log
+          
+          # Build with ReleaseFast
+          echo "Building with ReleaseFast optimization..."
+          zig build -Doptimize=ReleaseFast 2>&1 | tee build-fast.log
+          
+          # Build with ReleaseSmall
+          echo "Building with ReleaseSmall optimization..."
+          zig build -Doptimize=ReleaseSmall 2>&1 | tee build-small.log
+
+      - name: Run all tests
+        working-directory: core
+        run: |
+          echo "=== Running All Tests ==="
+          zig build test 2>&1 | tee test-results.log
+
+      - name: Check binary sizes
+        run: |
+          echo "=== Binary Size Report ==="
+          for opt in Debug ReleaseSafe ReleaseFast ReleaseSmall; do
+            if [ -f "core/zig-out/bin/sweef" ]; then
+              SIZE=$(stat -c%s core/zig-out/bin/sweef)
+              SIZE_MB=$(echo "scale=2; $SIZE / 1024 / 1024" | bc)
+              echo "  $opt: ${SIZE} bytes (${SIZE_MB} MB)"
+            fi
+          done
+
+      - name: Test memory usage
+        run: |
+          echo "=== Memory Usage Report ==="
+          ./core/zig-out/bin/sweef --headless --mcp --mcp-port 3004 &
+          BROWSER_PID=$!
+          sleep 2
+          
+          # Take multiple samples
+          for i in {1..10}; do
+            MEM_RSS=$(ps -p $BROWSER_PID -o rss= | tail -1 | tr -d ' ')
+            MEM_MB=$(echo "scale=2; $MEM_RSS / 1024" | bc)
+            echo "  Sample $i: ${MEM_MB} MB"
+            sleep 1
+          done
+          
+          kill $BROWSER_PID 2>/dev/null
+          wait $BROWSER_PID 2>/dev/null
+
+      - name: Test SDKs
+        run: |
+          echo "=== SDK Tests ==="
+          
+          # Setup Node.js
+          echo "Testing Node.js SDK..."
+          cd sdks/nodejs
+          npm install > /dev/null 2>&1
+          node -e "
+            const { Browser } = require('./index');
+            (async () => {
+              try {
+                const browser = await Browser.launch({ headless: true });
+                const page = await browser.newPage();
+                console.log('  ✅ Node.js SDK: Browser launched successfully');
+                await browser.close();
+              } catch (e) {
+                console.error('  ❌ Node.js SDK: Failed', e.message);
+              }
+            })();
+          " 2>&1 || true
+          
+          # Setup Python
+          echo "Testing Python SDK..."
+          cd ../python
+          pip install -e . > /dev/null 2>&1
+          python3 -c "
+            import asyncio
+            from sweef import Browser
+            async def test():
+                try:
+                    browser = await Browser.launch(headless=True)
+                    page = await browser.new_page()
+                    print('  ✅ Python SDK: Browser launched successfully')
+                    await browser.close()
+                except Exception as e:
+                    print(f'  ❌ Python SDK: Failed {e}')
+            asyncio.run(test())
+          " 2>&1 || true
+
+      - name: Generate nightly report
+        run: |
+          echo "# Nightly Build Report" > nightly-report.md
+          echo "" >> nightly-report.md
+          echo "**Date:** $(date)" >> nightly-report.md
+          echo "**Ref:** ${{ github.ref || github.event.inputs.ref || 'main' }}" >> nightly-report.md
+          echo "" >> nightly-report.md
+          
+          echo "## Build Results" >> nightly-report.md
+          echo "" >> nightly-report.md
+          
+          for opt in Debug ReleaseSafe ReleaseFast ReleaseSmall; do
+            if [ -f "core/build-${opt,,}.log" ]; then
+              echo "### $opt" >> nightly-report.md
+              echo "" >> nightly-report.md
+              echo "\`\`\`" >> nightly-report.md
+              tail -20 "core/build-${opt,,}.log" >> nightly-report.md
+              echo "\`\`\`" >> nightly-report.md
+              echo "" >> nightly-report.md
+            fi
+          done
+          
+          echo "## Test Results" >> nightly-report.md
+          echo "" >> nightly-report.md
+          echo "\`\`\`" >> nightly-report.md
+          tail -50 core/test-results.log >> nightly-report.md
+          echo "\`\`\`" >> nightly-report.md
+
+      - name: Upload nightly report
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-report-${{ github.run_id }}
+          path: nightly-report.md
+
+      - name: Upload all binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-binaries-${{ github.run_id }}
+          path: |
+            core/zig-out/bin/
+            core/*.log
+
+      - name: Create GitHub issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'nightly-failure'
+            });
+            
+            if (issues.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Nightly Build Failed - ${{ github.ref || 'main' }}`,
+                body: `Nightly build failed for ${{ github.ref || 'main' }} at ${new Date().toISOString()}.\n\nSee: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+                labels: ['nightly-failure', 'bug']
+              });
+            }

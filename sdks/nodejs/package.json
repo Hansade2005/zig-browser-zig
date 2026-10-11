@@ -1,0 +1,33 @@
+{
+  "name": "sweef",
+  "version": "0.1.0",
+  "description": "Ultra-lightweight browser for AI agents and humans - Node.js SDK",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "keywords": [
+    "browser",
+    "automation",
+    "playwright",
+    "puppeteer",
+    "headless",
+    "ai",
+    "mcp",
+    "lightweight"
+  ],
+  "author": "Sweef Browser Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sweef-browser/sweef.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sweef-browser/sweef/issues"
+  },
+  "homepage": "https://github.com/sweef-browser/sweef#readme",
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

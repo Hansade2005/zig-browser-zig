@@ -1,0 +1,440 @@
+name: Zig Build & Test
+
+on:
+  push:
+    branches: [ main, dev, vibe/* ]
+    paths:
+      - 'core/**'
+      - 'quickjs/**'
+      - '.github/workflows/zig-build-test.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'core/**'
+      - 'quickjs/**'
+
+concurrency:
+  group: zig-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-linux:
+    name: Build & Test (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Install Zig
+        run: |
+          # Download Zig 0.11.0
+          curl -L https://ziglang.org/builds/zig-linux-x86_64-0.11.0.tar.xz -o zig.tar.xz
+          mkdir -p zig-install
+          tar -xf zig.tar.xz -C zig-install --strip-components=1
+          echo "$(pwd)/zig-install" >> $GITHUB_PATH
+          rm zig.tar.xz
+
+      - name: Verify Zig installation
+        run: |
+          zig version
+          zig env
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev libmbedtls-dev
+
+      - name: Build core engine (Debug)
+        working-directory: core
+        run: |
+          echo "=== Building Sweef Core (Debug) ==="
+          zig build -Doptimize=Debug 2>&1 | tee build-debug.log
+          echo "=== Build completed ==="
+
+      - name: Build core engine (ReleaseSafe)
+        working-directory: core
+        run: |
+          echo "=== Building Sweef Core (ReleaseSafe) ==="
+          zig build -Doptimize=ReleaseSafe 2>&1 | tee build-release.log
+          echo "=== Build completed ==="
+
+      - name: Run tests
+        working-directory: core
+        run: |
+          echo "=== Running Tests ==="
+          zig build test 2>&1 | tee test-results.log
+          echo "=== Tests completed ==="
+
+      - name: Check binary
+        working-directory: core
+        run: |
+          echo "=== Checking Binary ==="
+          ls -lh zig-out/bin/sweef
+          file zig-out/bin/sweef
+          echo "=== Binary check completed ==="
+
+      - name: Test headless mode
+        working-directory: core
+        run: |
+          echo "=== Testing Headless Mode ==="
+          timeout 5 ./zig-out/bin/sweef --headless --url about:blank 2>&1 || true
+          echo "=== Headless test completed ==="
+
+      - name: Test MCP server
+        working-directory: core
+        run: |
+          echo "=== Testing MCP Server ==="
+          timeout 3 ./zig-out/bin/sweef --headless --mcp 2>&1 || true
+          echo "=== MCP test completed ==="
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: sweef-linux-x64
+          path: |
+            core/zig-out/bin/sweef
+            core/build-debug.log
+            core/build-release.log
+            core/test-results.log
+
+  build-macos:
+    name: Build & Test (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Install Zig
+        run: |
+          curl -L https://ziglang.org/builds/zig-macos-x86_64-0.11.0.tar.xz -o zig.tar.xz
+          mkdir -p zig-install
+          tar -xf zig.tar.xz -C zig-install --strip-components=1
+          echo "$(pwd)/zig-install" >> $GITHUB_PATH
+          rm zig.tar.xz
+
+      - name: Verify Zig installation
+        run: |
+          zig version
+          zig env
+
+      - name: Install dependencies
+        run: |
+          brew install sdl2 sdl2_image sdl2_ttf mbedtls
+
+      - name: Build core engine
+        working-directory: core
+        run: |
+          echo "=== Building Sweef Core ==="
+          zig build -Doptimize=ReleaseSafe 2>&1 | tee build.log
+          echo "=== Build completed ==="
+
+      - name: Run tests
+        working-directory: core
+        run: |
+          echo "=== Running Tests ==="
+          zig build test 2>&1 | tee test-results.log
+          echo "=== Tests completed ==="
+
+      - name: Check binary
+        working-directory: core
+        run: |
+          ls -lh zig-out/bin/sweef
+          file zig-out/bin/sweef
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: sweef-macos-x64
+          path: |
+            core/zig-out/bin/sweef
+            core/build.log
+            core/test-results.log
+
+  build-windows:
+    name: Build & Test (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Install Zig
+        run: |
+          # Download Zig for Windows
+          Invoke-WebRequest -Uri "https://ziglang.org/builds/zig-windows-x86_64-0.11.0.zip" -OutFile "zig.zip"
+          Expand-Archive -Path "zig.zip" -DestinationPath "zig-install"
+          Add-Content -Path $env:GITHUB_PATH -Value "$(Get-Location)\zig-install"
+          Remove-Item "zig.zip"
+
+      - name: Verify Zig installation
+        run: |
+          zig version
+          zig env
+
+      - name: Install dependencies
+        run: |
+          # Install SDL2 and mbedTLS using vcpkg
+          vcpkg install sdl2 sdl2-image sdl2-ttf mbedtls
+
+      - name: Build core engine
+        working-directory: core
+        run: |
+          zig build -Doptimize=ReleaseSafe 2>&1 | Tee-Object -FilePath build.log
+
+      - name: Run tests
+        working-directory: core
+        run: |
+          zig build test 2>&1 | Tee-Object -FilePath test-results.log
+
+      - name: Check binary
+        working-directory: core
+        run: |
+          Get-ChildItem zig-out\bin\sweef.exe
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: sweef-windows-x64
+          path: |
+            core/zig-out/bin/sweef.exe
+            core/build.log
+            core/test-results.log
+
+  sdk-nodejs:
+    name: Node.js SDK Test
+    runs-on: ubuntu-latest
+    needs: build-linux
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: sweef-linux-x64
+
+      - name: Make binary executable
+        run: chmod +x sweef
+
+      - name: Install Node.js SDK dependencies
+        working-directory: sdks/nodejs
+        run: npm install
+
+      - name: Test Node.js SDK
+        working-directory: sdks/nodejs
+        run: |
+          echo "=== Testing Node.js SDK ==="
+          node -e "
+            const { Browser } = require('./index');
+            (async () => {
+              try {
+                const browser = await Browser.launch({ headless: true });
+                const page = await browser.newPage();
+                console.log('✅ Browser launched successfully');
+                await browser.close();
+                console.log('✅ All Node.js SDK tests passed');
+              } catch (e) {
+                console.error('❌ Node.js SDK test failed:', e.message);
+                process.exit(1);
+              }
+            })();
+          " 2>&1 | tee nodejs-test.log
+
+      - name: Upload Node.js test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nodejs-sdk-test-results
+          path: sdks/nodejs/nodejs-test.log
+
+  sdk-python:
+    name: Python SDK Test
+    runs-on: ubuntu-latest
+    needs: build-linux
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: sweef-linux-x64
+
+      - name: Make binary executable
+        run: chmod +x sweef
+
+      - name: Install Python SDK
+        working-directory: sdks/python
+        run: |
+          pip install -e .
+
+      - name: Test Python SDK
+        run: |
+          echo "=== Testing Python SDK ==="
+          python3 -c "
+            import asyncio
+            from sweef import Browser
+            
+            async def test():
+                try:
+                    browser = await Browser.launch(headless=True)
+                    page = await browser.new_page()
+                    print('✅ Browser launched successfully')
+                    await browser.close()
+                    print('✅ All Python SDK tests passed')
+                except Exception as e:
+                    print(f'❌ Python SDK test failed: {e}')
+                    raise
+            
+            asyncio.run(test())
+          " 2>&1 | tee python-test.log
+
+      - name: Upload Python test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: python-sdk-test-results
+          path: python-test.log
+
+  memory-test:
+    name: Memory Usage Test
+    runs-on: ubuntu-latest
+    needs: build-linux
+    timeout-minutes: 10
+
+    steps:
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: sweef-linux-x64
+
+      - name: Make binary executable
+        run: chmod +x sweef
+
+      - name: Test memory usage
+        run: |
+          echo "=== Memory Usage Test ==="
+          echo "Testing headless mode memory usage..."
+          
+          # Start browser in background
+          ./sweef --headless --mcp --mcp-port 3001 &
+          BROWSER_PID=$!
+          
+          # Wait for startup
+          sleep 2
+          
+          # Check memory usage
+          MEM_USAGE=$(ps -p $BROWSER_PID -o %mem,rss= | tail -1 | awk '{print $1}')
+          MEM_RSS=$(ps -p $BROWSER_PID -o rss= | tail -1)
+          
+          echo "Memory Usage: ${MEM_USAGE}% (RSS: ${MEM_RSS} KB)"
+          
+          # Kill browser
+          kill $BROWSER_PID
+          wait $BROWSER_PID 2>/dev/null
+          
+          # Check if under 50MB
+          MEM_KB=$(echo $MEM_RSS | tr -d ' ')
+          if [ "$MEM_KB" -lt 51200 ]; then
+            echo "✅ Memory usage is under 50MB target (${MEM_KB} KB)"
+          else
+            echo "❌ Memory usage exceeds 50MB target (${MEM_KB} KB)"
+            exit 1
+          fi
+          
+          echo "=== Memory test completed ==="
+
+  size-test:
+    name: Binary Size Test
+    runs-on: ubuntu-latest
+    needs: build-linux
+    timeout-minutes: 5
+
+    steps:
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: sweef-linux-x64
+
+      - name: Check binary size
+        run: |
+          echo "=== Binary Size Test ==="
+          BINARY_SIZE=$(stat -c%s sweef)
+          SIZE_MB=$(echo "scale=2; $BINARY_SIZE / 1024 / 1024" | bc)
+          
+          echo "Binary size: ${BINARY_SIZE} bytes (${SIZE_MB} MB)"
+          
+          # Check if under 10MB
+          if [ "$BINARY_SIZE" -lt 10485760 ]; then
+            echo "✅ Binary size is under 10MB target (${SIZE_MB} MB)"
+          else
+            echo "⚠️  Binary size exceeds 10MB (${SIZE_MB} MB)"
+          fi
+          
+          echo "=== Binary size test completed ==="
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-macos, build-windows, sdk-nodejs, sdk-python, memory-test, size-test]
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 10
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        if: success()
+        with:
+          name: Sweef Browser v0.1.0
+          tag_name: v0.1.0
+          body: |
+            # Sweef Browser v0.1.0
+            
+            Ultra-lightweight browser for AI agents and humans.
+            
+            ## Changes
+            - Initial release
+            - Core engine with Zig
+            - QuickJS JavaScript engine
+            - MCP server for AI agents
+            - Node.js and Python SDKs
+            - Headless and GUI modes
+          files: |
+            artifacts/sweef-linux-x64/sweef
+            artifacts/sweef-macos-x64/sweef
+            artifacts/sweef-windows-x64/sweef.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

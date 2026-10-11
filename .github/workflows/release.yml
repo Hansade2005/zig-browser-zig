@@ -1,0 +1,340 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v0.1.0)'
+        required: true
+      dry-run:
+        description: 'Dry run (do not publish)'
+        required: false
+        default: 'false'
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  prepare-release:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract-version.outputs.version }}
+      tag: ${{ steps.extract-version.outputs.tag }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: extract-version
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Extract from git tag
+            TAG=${{ github.ref_name }}
+            VERSION=${TAG#v}
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+          else
+            # Use input
+            VERSION=${{ github.event.inputs.version }}
+            TAG=${VERSION#v}
+            echo "version=${VERSION#v}" >> $GITHUB_OUTPUT
+            echo "tag=v${VERSION#v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Validate version
+        run: |
+          VERSION=${{ steps.extract-version.outputs.version }}
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version format: $VERSION"
+            exit 1
+          fi
+          echo "Releasing version: $VERSION"
+
+  build-release:
+    name: Build Release Binaries
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            target: x86_64
+            artifact: sweef-linux-x64
+            zig_target: native
+          - os: macos
+            target: x86_64
+            artifact: sweef-macos-x64
+            zig_target: native
+          - os: windows
+            target: x86_64
+            artifact: sweef-windows-x64
+            zig_target: native
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Install Zig
+        run: |
+          curl -L https://ziglang.org/builds/zig-linux-x86_64-0.11.0.tar.xz -o zig.tar.xz
+          mkdir -p zig-install
+          tar -xf zig.tar.xz -C zig-install --strip-components=1
+          echo "$(pwd)/zig-install" >> $GITHUB_PATH
+          rm zig.tar.xz
+
+      - name: Install dependencies (Linux)
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev libmbedtls-dev
+
+      - name: Install dependencies (macOS)
+        if: matrix.os == 'macos'
+        run: |
+          brew install sdl2 sdl2_image sdl2_ttf mbedtls
+
+      - name: Build release binary
+        working-directory: core
+        run: |
+          VERSION=${{ needs.prepare-release.outputs.version }}
+          echo "Building Sweef v$VERSION for ${{ matrix.os }} ${{ matrix.target }}"
+          
+          # Build with ReleaseSmall for minimal size
+          zig build -Doptimize=ReleaseSmall -Dtarget=${{ matrix.zig_target }}
+          
+          # Rename binary with version
+          mv zig-out/bin/sweef zig-out/bin/sweef-v${VERSION}
+          
+          # Strip debug symbols
+          strip zig-out/bin/sweef-v${VERSION}
+          
+          # Show binary info
+          ls -lh zig-out/bin/sweef-v${VERSION}
+          file zig-out/bin/sweef-v${VERSION}
+
+      - name: Upload release binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-v${{ needs.prepare-release.outputs.version }}
+          path: core/zig-out/bin/sweef-v${{ needs.prepare-release.outputs.version }}
+
+  build-sdk-nodejs:
+    name: Build Node.js SDK
+    needs: prepare-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: sdks/nodejs
+        run: npm install
+
+      - name: Update version in package.json
+        working-directory: sdks/nodejs
+        run: |
+          VERSION=${{ needs.prepare-release.outputs.version }}
+          jq ".version = \"$VERSION\"" package.json > package.json.tmp
+          mv package.json.tmp package.json
+          cat package.json | grep version
+
+      - name: Build Node.js SDK
+        working-directory: sdks/nodejs
+        run: npm run build 2>&1 || echo "No build script, skipping"
+
+      - name: Package Node.js SDK
+        working-directory: sdks/nodejs
+        run: |
+          VERSION=${{ needs.prepare-release.outputs.version }}
+          mkdir -p dist
+          cp -r index.js index.d.ts package.json dist/
+          tar -czf sweef-nodejs-sdk-v${VERSION}.tar.gz dist/
+
+      - name: Upload Node.js SDK
+        uses: actions/upload-artifact@v4
+        with:
+          name: sweef-nodejs-sdk-v${{ needs.prepare-release.outputs.version }}
+          path: sdks/nodejs/sweef-nodejs-sdk-v*.tar.gz
+
+  build-sdk-python:
+    name: Build Python SDK
+    needs: prepare-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install setuptools wheel
+
+      - name: Update version in setup.py
+        working-directory: sdks/python
+        run: |
+          VERSION=${{ needs.prepare-release.outputs.version }}
+          sed -i "s/version=\"[0-9]*\.[0-9]*\.[0-9]*\"/version=\"$VERSION\"/" setup.py
+          cat setup.py | grep version
+
+      - name: Build Python wheel
+        working-directory: sdks/python
+        run: |
+          python setup.py sdist bdist_wheel
+
+      - name: Upload Python SDK
+        uses: actions/upload-artifact@v4
+        with:
+          name: sweef-python-sdk-v${{ needs.prepare-release.outputs.version }}
+          path: sdks/python/dist/
+
+  publish-release:
+    name: Publish Release
+    needs: [build-release, build-sdk-nodejs, build-sdk-python]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.inputs.dry-run == 'false'
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f -name "sweef*" | head -20
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Sweef Browser v${{ needs.prepare-release.outputs.version }}
+          tag_name: ${{ needs.prepare-release.outputs.tag }}
+          body: |
+            # Sweef Browser v${{ needs.prepare-release.outputs.version }}
+            
+            Ultra-lightweight browser for AI agents and humans.
+            
+            ## 🌟 What's New
+            - Initial stable release
+            - Full Playwright-like API
+            - MCP protocol support for AI agents
+            - Node.js and Python SDKs
+            - Headless and GUI modes
+            
+            ## 📦 Assets
+            - **Linux x86_64**: Headless browser binary
+            - **macOS x86_64**: Headless browser binary
+            - **Windows x86_64**: Headless browser binary
+            - **Node.js SDK**: npm package
+            - **Python SDK**: pip package
+            
+            ## 🔧 Installation
+            
+            ### Binary
+            Download the appropriate binary for your platform and make it executable:
+            ```bash
+            chmod +x sweef-*-v${{ needs.prepare-release.outputs.version }}
+            ./sweef-*-v${{ needs.prepare-release.outputs.version }} --help
+            ```
+            
+            ### Node.js SDK
+            ```bash
+            npm install sweef@${{ needs.prepare-release.outputs.version }}
+            ```
+            
+            ### Python SDK
+            ```bash
+            pip install sweef==${{ needs.prepare-release.outputs.version }}
+            ```
+            
+            ## 📄 Changelog
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ needs.prepare-release.outputs.tag }}/CHANGELOG.md) for details.
+          files: |
+            artifacts/**/sweef-*-v${{ needs.prepare-release.outputs.version }}
+            artifacts/**/sweef-*-v${{ needs.prepare-release.outputs.version }}.tar.gz
+            artifacts/**/sweef-*-v${{ needs.prepare-release.outputs.version }}.whl
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-npm:
+    name: Publish to npm
+    needs: [prepare-release, build-sdk-nodejs]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.inputs.dry-run == 'false'
+
+    steps:
+      - name: Download Node.js SDK
+        uses: actions/download-artifact@v4
+        with:
+          name: sweef-nodejs-sdk-v${{ needs.prepare-release.outputs.version }}
+
+      - name: Extract SDK
+        run: |
+          VERSION=${{ needs.prepare-release.outputs.version }}
+          tar -xzf sweef-nodejs-sdk-v${VERSION}.tar.gz
+          cd dist
+          ls -la
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Publish to npm
+        working-directory: dist
+        run: |
+          VERSION=${{ needs.prepare-release.outputs.version }}
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: [prepare-release, build-sdk-python]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.inputs.dry-run == 'false'
+
+    steps:
+      - name: Download Python SDK
+        uses: actions/download-artifact@v4
+        with:
+          name: sweef-python-sdk-v${{ needs.prepare-release.outputs.version }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install twine
+        run: pip install twine
+
+      - name: Publish to PyPI
+        run: |
+          VERSION=${{ needs.prepare-release.outputs.version }}
+          cd dist
+          twine upload sweef-${VERSION}-py3-none-any.whl
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}

@@ -1,0 +1,41 @@
+# Dependencies
+/node_modules
+/zig-cache
+/zig-out
+
+# Build artifacts
+/build
+/dist
+/target
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test coverage
+/coverage
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Zig
+*.zig.cache
