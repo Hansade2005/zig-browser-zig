@@ -86,7 +86,7 @@ pub const SweefBrowser = struct {
 
     pub fn closePage(self: *SweefBrowser, page: *Page) void {
         page.deinit();
-        for (self.pages.items) |p, i| {
+        for (self.pages.items, 0..) |p, i| {
             if (p == page) {
                 _ = self.pages.remove(i);
                 break;
@@ -143,7 +143,6 @@ pub const SweefBrowser = struct {
         std.debug.print("Sweef REPL Mode\n", .{});
         std.debug.print("Type JavaScript code and press Enter. Type 'exit' to quit.\n", .{});
 
-        var input: [1024]u8 = undefined;
         while (true) {
             std.debug.print("> ", .{});
             const line = std.io.getStdIn().readUntilDelimiterOrEofAlloc(self.allocator, '\n', 1024) catch continue;
@@ -191,7 +190,6 @@ const Page = struct {
     }
 
     pub fn goto(self: *Page, url: []const u8) !void {
-        _ = self;
         _ = url;
         // HTTP request would go here
         if (self.config.debug) {
@@ -200,7 +198,6 @@ const Page = struct {
     }
 
     pub fn evaluate(self: *Page, script: []const u8) !void {
-        _ = self;
         _ = script;
         if (self.config.debug) {
             std.debug.print("Evaluating: {s}\n", .{script});
