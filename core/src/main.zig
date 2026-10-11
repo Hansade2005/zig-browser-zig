@@ -495,38 +495,11 @@ pub fn main() !void {
 }
 
 fn printUsage() void {
-    std.debug.print(
-        \ Usage: sweef [OPTIONS]\n
-\n
-\nOptions:\n
-\n\n  --headless         Run in headless mode (default)\n
-\n  --gui              Run with GUI (SDL2)\n
-\n  --debug            Enable debug logs\n
-\n  --mcp              Enable MCP server for AI agents\n
-\n  --mcp-port PORT    MCP server port (default: 3000)\n
-\n  --user-agent UA    Set custom user agent\n
-\n  --viewport WxH     Set viewport size (default: 800x600)\n
-\n  --timeout MS       Set default timeout in milliseconds\n
-\n  --slow-mo MS       Slow down operations by MS milliseconds\n
-\n  --disable-js       Disable JavaScript\n
-\n  --disable-css      Disable CSS\n
-\n  --disable-images   Disable images\n
-\n  --script FILE      Run a script file\n
-\n  --url URL          Open a URL on startup\n
-\n  --repl             Start interactive REPL mode\n
-\n  --help, -h         Show this help message\n
-\n  --version, -v      Show version\n
-\n\nExamples:\n
-\n  sweef --headless --mcp              # Run MCP server for AI agents\n
-\n  sweef --gui                         # Run with GUI\n
-\n  sweef --url https://example.com     # Open a URL\n
-\n  sweef --script test.js              # Run a JavaScript script\n
-\n  sweef --repl                        # Start REPL mode\n
-\n\nSweef Browser v0.1.0\n
-\nThe ultra-lightweight browser for AI agents and humans.\n
-\n  GitHub: https://github.com/sweef-browser/sweef\n
-\n  License: MIT\n
-\n,
-        .{},
+    std.debug.print("Usage: sweef [OPTIONS]
+  --headless    Run in headless mode
+  --gui         Run with GUI
+  --help, -h    Show help
+", .{});
+},
     );
 }
